@@ -160,10 +160,50 @@ class HomePage extends StatefulWidget {
 }
 
 class _HomePageState extends State<HomePage> {
+  late TextEditingController _searchController;
+  String _sortOption = 'none'; // 'none', 'service', 'atmosphere'
+  String _activeSearchText = ''; // Text který se aktuálně používá k filtrování
+
+  @override
+  void initState() {
+    super.initState();
+    _searchController = TextEditingController();
+  }
+
+  @override
+  void dispose() {
+    _searchController.dispose();
+    super.dispose();
+  }
+
   /// Přednačítá data z Supabase pokaždé, když se stránka obnoví
   Future<List<Restaurant>> _loadRestaurants() async {
     final data = await SupabaseService.getRestaurants();
     return data.map((r) => Restaurant.fromMap(r)).toList();
+  }
+
+  /// Filtruje a třídí restaurace podle hledaného textu a volby třídění
+  List<Restaurant> _filterAndSortRestaurants(List<Restaurant> restaurants) {
+    // Filtrování podle aktivního vyhledávacího textu
+    List<Restaurant> filtered = restaurants.where((restaurant) {
+      return restaurant.name.toLowerCase().contains(_activeSearchText.toLowerCase());
+    }).toList();
+
+    // Třídění
+    switch (_sortOption) {
+      case 'service':
+        filtered.sort((a, b) => b.serviceRating.compareTo(a.serviceRating));
+        break;
+      case 'atmosphere':
+        filtered.sort((a, b) => b.atmosphereRating.compareTo(a.atmosphereRating));
+        break;
+      case 'none':
+      default:
+        // Zůstává ve výchozím pořadí
+        break;
+    }
+
+    return filtered;
   }
 
   @override
@@ -186,9 +226,10 @@ class _HomePageState extends State<HomePage> {
             );
           }
 
-          final restaurants = snapshot.data ?? [];
+          final allRestaurants = snapshot.data ?? [];
+          final restaurants = _filterAndSortRestaurants(allRestaurants);
 
-          if (restaurants.isEmpty) {
+          if (allRestaurants.isEmpty) {
             return const Center(
               child: Text(
                 'Přidejte první restauraci',
@@ -197,131 +238,254 @@ class _HomePageState extends State<HomePage> {
             );
           }
 
-          return ListView.builder(
-            itemCount: restaurants.length,
-            itemBuilder: (context, index) {
-              final restaurant = restaurants[index];
-              return Card(
-                margin: const EdgeInsets.all(8.0),
-                child: ListTile(
-                  leading: const Icon(Icons.restaurant, color: Colors.orange),
-                  title: Text(
-                    restaurant.name,
-                    style: const TextStyle(fontWeight: FontWeight.bold),
-                  ),
-                  subtitle: Column(
-                    crossAxisAlignment: CrossAxisAlignment.start,
-                    children: [
-                      Text(
-                        'Recenze vytvořena: ${restaurant.createdAt.toLocal().toString().substring(0, 16)}',
-                        style: const TextStyle(
-                          fontSize: 12,
-                          fontStyle: FontStyle.italic,
+          return Column(
+            children: [
+              // Vyhledávací pole s tlačítkem
+              Padding(
+                padding: const EdgeInsets.all(8.0),
+                child: Row(
+                  children: [
+                    Expanded(
+                      child: TextField(
+                        controller: _searchController,
+                        decoration: InputDecoration(
+                          hintText: 'Hledat restauraci...',
+                          prefixIcon: const Icon(Icons.search),
+                          border: OutlineInputBorder(
+                            borderRadius: BorderRadius.circular(8),
+                          ),
+                          contentPadding: const EdgeInsets.symmetric(
+                            horizontal: 12,
+                            vertical: 8,
+                          ),
                         ),
                       ),
-                      const SizedBox(height: 4),
-                      ...restaurant.dishes.map(
-                        (dish) => Padding(
-                          padding: const EdgeInsets.only(bottom: 8.0),
-                          child: Column(
+                    ),
+                    const SizedBox(width: 8),
+                    ElevatedButton.icon(
+                      onPressed: () {
+                        setState(() {
+                          _activeSearchText = _searchController.text;
+                        });
+                      },
+                      icon: const Icon(Icons.search),
+                      label: const Text('Hledat'),
+                    ),
+                    const SizedBox(width: 4),
+                    if (_activeSearchText.isNotEmpty)
+                      ElevatedButton.icon(
+                        onPressed: () {
+                          setState(() {
+                            _searchController.clear();
+                            _activeSearchText = '';
+                          });
+                        },
+                        icon: const Icon(Icons.clear),
+                        label: const Text('Zrušit'),
+                        style: ElevatedButton.styleFrom(
+                          backgroundColor: Colors.grey[400],
+                        ),
+                      ),
+                  ],
+                ),
+              ),
+              // Tlačítka pro třídění
+              Padding(
+                padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                child: Row(
+                  children: [
+                    const Text('Třídění: ', style: TextStyle(fontWeight: FontWeight.w500)),
+                    const SizedBox(width: 8),
+                    Expanded(
+                      child: SingleChildScrollView(
+                        scrollDirection: Axis.horizontal,
+                        child: Row(
+                          children: [
+                            ChoiceChip(
+                              label: const Text('Výchozí'),
+                              selected: _sortOption == 'none',
+                              onSelected: (selected) {
+                                setState(() {
+                                  _sortOption = 'none';
+                                });
+                              },
+                            ),
+                            const SizedBox(width: 8),
+                            ChoiceChip(
+                              label: const Text('Obsluha ⭐'),
+                              selected: _sortOption == 'service',
+                              onSelected: (selected) {
+                                setState(() {
+                                  _sortOption = 'service';
+                                });
+                              },
+                            ),
+                            const SizedBox(width: 8),
+                            ChoiceChip(
+                              label: const Text('Atmosféra ⭐'),
+                              selected: _sortOption == 'atmosphere',
+                              onSelected: (selected) {
+                                setState(() {
+                                  _sortOption = 'atmosphere';
+                                });
+                              },
+                            ),
+                          ],
+                        ),
+                      ),
+                    ),
+                  ],
+                ),
+              ),
+              // Zpráva o počtu výsledků
+              if (restaurants.length != allRestaurants.length)
+                Padding(
+                  padding: const EdgeInsets.symmetric(horizontal: 8.0, vertical: 4.0),
+                  child: Text(
+                    'Nalezeno: ${restaurants.length} z ${allRestaurants.length} restaurací',
+                    style: const TextStyle(fontSize: 12, color: Colors.grey),
+                  ),
+                ),
+              // Seznam restaurací
+              if (restaurants.isEmpty)
+                const Expanded(
+                  child: Center(
+                    child: Text(
+                      'Žádné restaurace nebyly nalezeny',
+                      style: TextStyle(fontSize: 14),
+                    ),
+                  ),
+                )
+              else
+                Expanded(
+                  child: ListView.builder(
+                    itemCount: restaurants.length,
+                    itemBuilder: (context, index) {
+                      final restaurant = restaurants[index];
+                      return Card(
+                        margin: const EdgeInsets.all(8.0),
+                        child: ListTile(
+                          leading: const Icon(Icons.restaurant, color: Colors.orange),
+                          title: Text(
+                            restaurant.name,
+                            style: const TextStyle(fontWeight: FontWeight.bold),
+                          ),
+                          subtitle: Column(
                             crossAxisAlignment: CrossAxisAlignment.start,
                             children: [
                               Text(
-                                dish.name,
+                                'Recenze vytvořena: ${restaurant.createdAt.toLocal().toString().substring(0, 16)}',
                                 style: const TextStyle(
-                                  fontWeight: FontWeight.bold,
+                                  fontSize: 12,
+                                  fontStyle: FontStyle.italic,
                                 ),
                               ),
+                              const SizedBox(height: 4),
+                              ...restaurant.dishes.map(
+                                (dish) => Padding(
+                                  padding: const EdgeInsets.only(bottom: 8.0),
+                                  child: Column(
+                                    crossAxisAlignment: CrossAxisAlignment.start,
+                                    children: [
+                                      Text(
+                                        dish.name,
+                                        style: const TextStyle(
+                                          fontWeight: FontWeight.bold,
+                                        ),
+                                      ),
+                                      StarRating(
+                                        rating: dish.rating,
+                                        onRatingChanged: (_) {},
+                                      ),
+                                      if (dish.comment.isNotEmpty)
+                                        Padding(
+                                          padding: const EdgeInsets.only(top: 2.0),
+                                          child: Text(dish.comment),
+                                        ),
+                                    ],
+                                  ),
+                                ),
+                              ),
+                              Text('Obsluha:'),
                               StarRating(
-                                rating: dish.rating,
+                                rating: restaurant.serviceRating,
                                 onRatingChanged: (_) {},
                               ),
-                              if (dish.comment.isNotEmpty)
+                              const SizedBox(height: 4),
+                              Text('Atmosféra:'),
+                              StarRating(
+                                rating: restaurant.atmosphereRating,
+                                onRatingChanged: (_) {},
+                              ),
+                              if (restaurant.atmosphereComment.isNotEmpty)
                                 Padding(
-                                  padding: const EdgeInsets.only(top: 2.0),
-                                  child: Text(dish.comment),
+                                  padding: const EdgeInsets.only(top: 4.0),
+                                  child: Text(
+                                    'Poznámka: ${restaurant.atmosphereComment}',
+                                  ),
                                 ),
                             ],
                           ),
-                        ),
-                      ),
-                      Text('Obsluha:'),
-                      StarRating(
-                        rating: restaurant.serviceRating,
-                        onRatingChanged: (_) {},
-                      ),
-                      const SizedBox(height: 4),
-                      Text('Atmosféra:'),
-                      StarRating(
-                        rating: restaurant.atmosphereRating,
-                        onRatingChanged: (_) {},
-                      ),
-                      if (restaurant.atmosphereComment.isNotEmpty)
-                        Padding(
-                          padding: const EdgeInsets.only(top: 4.0),
-                          child: Text(
-                            'Poznámka: ${restaurant.atmosphereComment}',
+                          trailing: Row(
+                            mainAxisSize: MainAxisSize.min,
+                            children: [
+                              IconButton(
+                                icon: const Icon(Icons.edit),
+                                tooltip: 'Upravit',
+                                onPressed: () async {
+                                  final updated = await Navigator.push(
+                                    context,
+                                    MaterialPageRoute(
+                                      builder: (context) =>
+                                          AddRestaurantPage(initial: restaurant),
+                                    ),
+                                  );
+                                  if (updated != null) {
+                                    setState(() {});
+                                  }
+                                },
+                              ),
+                              IconButton(
+                                icon: const Icon(Icons.delete),
+                                tooltip: 'Smazat',
+                                onPressed: () {
+                                  showDialog(
+                                    context: context,
+                                    builder: (ctx) => AlertDialog(
+                                      title: const Text('Potvrzení'),
+                                      content: Text(
+                                        'Opravdu chcete smazat ${restaurant.name}?',
+                                      ),
+                                      actions: [
+                                        TextButton(
+                                          onPressed: () => Navigator.pop(ctx),
+                                          child: const Text('Zrušit'),
+                                        ),
+                                        TextButton(
+                                          onPressed: () async {
+                                            await SupabaseService.deleteRestaurant(
+                                              restaurant.id,
+                                            );
+                                            if (mounted) {
+                                              Navigator.pop(ctx);
+                                              setState(() {});
+                                            }
+                                          },
+                                          child: const Text('Smazat'),
+                                        ),
+                                      ],
+                                    ),
+                                  );
+                                },
+                              ),
+                            ],
                           ),
                         ),
-                    ],
-                  ),
-                  trailing: Row(
-                    mainAxisSize: MainAxisSize.min,
-                    children: [
-                      IconButton(
-                        icon: const Icon(Icons.edit),
-                        tooltip: 'Upravit',
-                        onPressed: () async {
-                          final updated = await Navigator.push(
-                            context,
-                            MaterialPageRoute(
-                              builder: (context) =>
-                                  AddRestaurantPage(initial: restaurant),
-                            ),
-                          );
-                          if (updated != null) {
-                            setState(() {});
-                          }
-                        },
-                      ),
-                      IconButton(
-                        icon: const Icon(Icons.delete),
-                        tooltip: 'Smazat',
-                        onPressed: () {
-                          showDialog(
-                            context: context,
-                            builder: (ctx) => AlertDialog(
-                              title: const Text('Potvrzení'),
-                              content: Text(
-                                'Opravdu chcete smazat ${restaurant.name}?',
-                              ),
-                              actions: [
-                                TextButton(
-                                  onPressed: () => Navigator.pop(ctx),
-                                  child: const Text('Zrušit'),
-                                ),
-                                TextButton(
-                                  onPressed: () async {
-                                    await SupabaseService.deleteRestaurant(
-                                      restaurant.id,
-                                    );
-                                    if (mounted) {
-                                      Navigator.pop(ctx);
-                                      setState(() {});
-                                    }
-                                  },
-                                  child: const Text('Smazat'),
-                                ),
-                              ],
-                            ),
-                          );
-                        },
-                      ),
-                    ],
+                      );
+                    },
                   ),
                 ),
-              );
-            },
+            ],
           );
         },
       ),
